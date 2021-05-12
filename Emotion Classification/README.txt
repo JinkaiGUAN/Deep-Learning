@@ -1,0 +1,1 @@
+In this project, we build a classifier based on MobileNet V2. All the code used in this project is stored in the folder 'emotion_classification'. By running main.py, yu can see the log stored in folder 'result'. As for the data, it is stored in the 'Data' folder, where the folers laberled by int number are what we need.  

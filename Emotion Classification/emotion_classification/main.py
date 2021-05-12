@@ -13,11 +13,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
-from mydataset import EmotionDataset  # make the project being source root
-from mobilenet_v2 import mobilenet_v2
-from src.utils import ModelTrainer
+from src.mydataset import EmotionDataset  # make the project being source root
+from src.mobilenet_v2 import mobilenet_v2
+from src.utils import ModelTrainer, plot_comparison
 
-import numpy as np
 import json
 from datetime import datetime
 
@@ -43,12 +42,9 @@ if __name__ == '__main__':
     label_name = {'none': 0, 'pouting': 1, 'smile': 2, 'openmouth': 3}
 
     num_classes = len(label_name)
-    MAX_EPOCH = 10  # 182     # min: 2348 images 2348 / 32 = 73.5 epochs
+    MAX_EPOCH = 10
     LR = 0.01  # learning rate
-    log_interval = 1
-    val_interval = 1
-    start_epoch = -1
-    milestones = [5, 8]  # divide it by 10 at 32k and 48k iterations
+    milestones = [5, 8]  # divide it by 10 at 5th and 8th epoch
 
     # ======================== 1. Data ======================================= #
     norm_mean = [0.485, 0.456, 0.406]
@@ -62,7 +58,7 @@ if __name__ == '__main__':
          transforms.Normalize(mean=norm_mean, std=norm_std)])
     val_transform = transforms.Compose(
         [transforms.Resize(112), transforms.RandomCrop(96),
-         transforms.ToTensor,
+         transforms.ToTensor(),
          transforms.Normalize(mean=norm_mean, std=norm_std)])
     # Dataset
     train_dataset = EmotionDataset(data_root=os.path.join(ROOT, 'Data'),
@@ -72,10 +68,10 @@ if __name__ == '__main__':
                                  mode='val', split_ratio=0.9, rng_seed=620,
                                  transform=val_transform)
     # Dataloader
-    train_dataloader = DataLoader(dataset=train_dataset, batch_size=32,
-                                  shuffle=True, num_workers=3)
-    val_dataloader = DataLoader(dataset=val_dataset, batch_size=32,
-                                shuffle=True, num_workers=3)
+    train_dataloader = DataLoader(dataset=train_dataset, batch_size=64,
+                                  shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(dataset=val_dataset, batch_size=64,
+                                shuffle=True, num_workers=4)
 
     # Gain the GPU
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -100,11 +96,12 @@ if __name__ == '__main__':
     # ============================= 4. Optimizer ============================ #
     optimizer = optim.SGD(params=model.parameters(), lr=LR, momentum=0.9,
                           weight_decay=1e-4)
-    sceduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones)
 
     # ============================= 5. Training ============================= #
     loss_log = {'train': [], 'val': []}
     acc_log = {'train': [], 'val': []}
+    best_acc, best_epoch = 0.0, 0
 
     for i in range(MAX_EPOCH):
         # train the model
@@ -115,19 +112,41 @@ if __name__ == '__main__':
                                                    device=device, epoch_id=i,
                                                    max_epoch=MAX_EPOCH)
         # evaluate the model
+        loss_val, acc_val = ModelTrainer.val(val_dataloader, model, criterion,
+                                             device, epoch_id=i,
+                                             max_epoch=MAX_EPOCH)
+        scheduler.step()
 
         # print the information
         print(
-            "Epoch[{:0>3}/{:0>3}] \t Train Loss: {:.4f} \t Val Loss: {:.4f} \t Train Acc: {:.4f} \t Val Acc: {:.4f}".format(
+            "Epoch[{:0>3}/{:0>3}] \t Train Loss: {:.4f} \t Val Loss: {:.4f} \t "
+            "Train Acc: {:.4f} \t Val Acc: {:.4f}".format(
                 i + 1, MAX_EPOCH, loss_train, loss_train, acc_train, acc_train))
         print('-' * 10)
 
         loss_log['train'].append(loss_train)
+        loss_log['val'].append(loss_val)
         acc_log['train'].append(acc_train)
+        acc_log['val'].append(acc_val)
+
+        # save model weights
+        if best_acc < acc_val and (i > (MAX_EPOCH) / 2):
+            best_acc, best_epoch = acc_val, i + 1
+
+            checkpoint = {'model_state_dict': model.state_dict(),
+                          'optimizer_state_dict': optimizer.state_dict(),
+                          'epoch': i + 1, 'best_acc': best_acc}
+            path_checkpoint = os.path.join(log_dir_path, 'chechpoint_best.pkl')
+            torch.save(checkpoint, path_checkpoint)
 
     log = {'loss': loss_log, 'acc': acc_log}
     json_str = json.dumps(log, ensure_ascii=False, indent=4)
-    with open(os.path.join(log_dir_path, 'log.json'), 'w') as json_file:
+    json_log_path = os.path.join(log_dir_path, 'log.json')
+    with open(json_log_path, 'w') as json_file:
         json_file.write(json_str)
 
     # plot the graph
+    plot_comparison(json_log_path)
+
+    end_time_str = datetime.strftime(datetime.now(), '%Y-%m-%d-%H-%M')
+    print('End time ', end_time_str)
