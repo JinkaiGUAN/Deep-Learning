@@ -15,16 +15,26 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 from mydataset import EmotionDataset  # make the project being source root
 from mobilenet_v2 import mobilenet_v2
+from src.utils import ModelTrainer
 
 import numpy as np
+import json
 from datetime import datetime
 
 if __name__ == '__main__':
 
     # config
     ROOT = os.path.abspath(os.path.join(os.getcwd(), ".."))
+    state_dict_wts_path = os.path.join(ROOT, "emotion_classification", "src",
+                                       'mobilenet_v2-b0353104.pth')
+
+    # Time display
     current_time = datetime.now()
-    time_str = datetime.strftime(current_time, fmt='%Y-%m-%d-%H-%I-%M')
+    try:
+        time_str = datetime.strftime(current_time, fmt='%Y-%m-%d-%H-%M')
+    except:
+        time_str = datetime.strftime(current_time, '%Y-%m-%d-%H-%M')
+
     # create the folder storing all the results.
     log_dir_path = os.path.join(ROOT, 'results', time_str)
     if not os.path.exists(log_dir_path):
@@ -67,8 +77,22 @@ if __name__ == '__main__':
     val_dataloader = DataLoader(dataset=val_dataset, batch_size=32,
                                 shuffle=True, num_workers=3)
 
+    # Gain the GPU
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
     # ============================= 2. Model ================================= #
+    # model = mobilenet_v2(pretrained=True)
     model = mobilenet_v2()
+    pretrained_state_dict_wts = torch.load(state_dict_wts_path)
+    model.load_state_dict(pretrained_state_dict_wts)
+
+    print(model)
+
+    input_ftrs = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(input_ftrs, out_features=num_classes,
+                                    bias=True)
+
+    model.to(device=device)
 
     # ============================ 3. Loss function ========================= #
     criterion = nn.CrossEntropyLoss()
@@ -79,3 +103,31 @@ if __name__ == '__main__':
     sceduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones)
 
     # ============================= 5. Training ============================= #
+    loss_log = {'train': [], 'val': []}
+    acc_log = {'train': [], 'val': []}
+
+    for i in range(MAX_EPOCH):
+        # train the model
+        loss_train, acc_train = ModelTrainer.train(dataloader=train_dataloader,
+                                                   model=model,
+                                                   criterion=criterion,
+                                                   optimizer=optimizer,
+                                                   device=device, epoch_id=i,
+                                                   max_epoch=MAX_EPOCH)
+        # evaluate the model
+
+        # print the information
+        print(
+            "Epoch[{:0>3}/{:0>3}] \t Train Loss: {:.4f} \t Val Loss: {:.4f} \t Train Acc: {:.4f} \t Val Acc: {:.4f}".format(
+                i + 1, MAX_EPOCH, loss_train, loss_train, acc_train, acc_train))
+        print('-' * 10)
+
+        loss_log['train'].append(loss_train)
+        acc_log['train'].append(acc_train)
+
+    log = {'loss': loss_log, 'acc': acc_log}
+    json_str = json.dumps(log, ensure_ascii=False, indent=4)
+    with open(os.path.join(log_dir_path, 'log.json'), 'w') as json_file:
+        json_file.write(json_str)
+
+    # plot the graph

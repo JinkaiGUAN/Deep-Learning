@@ -12,6 +12,7 @@ import torch
 import cv2
 from torch.utils.data import Dataset
 import random
+from PIL import Image
 
 
 class EmotionDataset(Dataset):
@@ -45,7 +46,8 @@ class EmotionDataset(Dataset):
         if isinstance(idx, torch.Tensor):
             idx = idx.tolist()
         img_path, label = self.data_info[idx]
-        img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
+        # img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
+        img = Image.open(img_path).convert('RGB')
 
         if self.transform:
             img = self.transform(img)
